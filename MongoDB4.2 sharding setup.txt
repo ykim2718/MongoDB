@@ -1,0 +1,180 @@
+MongoDB4.2 sharding setup sequence.txt
+
+######################################
+1. shard server
+
+>> mongo --host 12.23.64.146 --port 28001
+>> rs.initiate({
+       _id: "PASystem_mongodb_shard_s1",
+       members: [
+           {_id: 0, host: "12.23.64.146:28001"},
+           {_id: 1, host: "12.23.64.168:28001"},
+           {_id: 2, host: "12.23.64.181:28001"},
+       ]
+   })
+
+>> mongo --host 12.23.64.109 --port 28001
+>> rs.initiate({
+       _id: "PASystem_mongodb_shard_s2",
+       members: [
+           {_id: 0, host: "12.23.64.109:28001"},
+           {_id: 1, host: "12.23.64.167:28001"},
+           {_id: 2, host: "12.23.64.148:28001"},
+       ]
+   })
+
+>> mongo --host 12.23.64.81 --port 28001
+>> rs.initiate({
+       _id: "PASystem_mongodb_shard_s3",
+       members: [
+           {_id: 0, host: "12.23.64.81:28001"},
+           {_id: 1, host: "12.23.64.152:28001"},
+           {_id: 2, host: "12.23.64.155:28001"},
+       ]
+   })
+
+######################################
+2. config server
+
+>> mongo --host 12.23.64.146 --port 28002
+>> rs.initiate({
+       _id: "PASystem_mongodb_config",
+       members: [
+           {_id: 0, host: "12.23.64.146:28002"},
+           {_id: 1, host: "12.23.64.168:28002"},
+           {_id: 2, host: "12.23.64.181:28002"},
+           {_id: 3, host: "12.23.64.109:28002"},
+           {_id: 4, host: "12.23.64.167:28002"},
+           {_id: 5, host: "12.23.64.148:28002"},
+       ]
+   })
+
+
+######################################
+3. run router (mongos)
+
+>> mongos.exe --configdb "PASystem_mongodb_config/12.23.64.146:280002,12.23.64.168:28002,12.23.64.181:28002,
+12.23.64.109:28002,12.23.64.167:28002,12.23.64.148:28002" --port 28000 --bind_ip_all
+
+
+######################################
+4. add shards to the router (mongos)
+
+>> mongo --host 12.23.64.241 --port 28000
+mongos> sh.addShard("PASystem_mongodb_shard_s1/12.23.64.146:28001,12.23.64.168:28001,12.23.64.181:28001")
+mongos> sh.addShard("PASystem_mongodb_shard_s2/12.23.64.109:28001,12.23.64.167:28001,12.23.64.148:28001")
+mongos> sh.addShard("PASystem_mongodb_shard_s3/12.23.64.81:28001,12.23.64.152:28001,12.23.64.155:28001")
+
+######################################
+5. enable sharding
+
+>> mongo --host 12.23.64.241 --port 28000
+mongos> show dbs
+mongos> use pa_fab
+mongos> sh.enableSharding("pa_fab")
+{
+    "ok" : 1,
+    "operationTime" : Timestamp(1576544849, 3),
+    "$clusterTime" : {
+        "clusterTime" : Timestamp(1576544849, 3),
+        "signature" : {
+            "hash" : BinData(0,"AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            "keyId" : NumberLong(0)
+        }
+    }
+}
+robo3t-1.2> create primary_key for pa_fab.dc
+{
+    "tkout_time" : 1,
+    "line_id" : 1,
+    "process_id" : 1,
+    "part_id" : 1,
+    "_lot_wafer" : 1,
+    "step_id" : 1,
+    "chip_x" : 1,
+    "chip_y" : 1,
+    "subitem_id" : 1
+}
+# robo3t-1.2> create shard_key for pa_fab.dc
+# {
+#     "tkout_time" : "hashed"
+# }
+mongos> sh.shardCollection("pa_fab.dc", {"tkout_time": "hashed"}, false)
+    or db.adminCommand({"shardCollection": "pa_fab.dc", "key": {"tkout_time": "hashed"}, "unique": false})
+{
+    "collectionsharded" : "pa_fab.dc",
+    "collectionUUID" : UUID("6b7bcc97-79c5-474b-b7d3-52f01a130a65"),
+    "ok" : 1,
+    "operationTime" : Timestamp(1576545261, 4),
+    "$clusterTime" : {
+        "clusterTime" : Timestamp(1576545261, 4),
+        "signature" : {
+            "hash" : BinData(0,"AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            "keyId" : NumberLong(0)
+        }
+    }
+}
+mongos> sh.status() or db.printShardingStatus()
+--- Sharding Status ---
+    sharding version: {
+        "_id" : 1,
+        "minCompatibleVersion" : 5,
+        "currentVersion" : 6,
+        "clusterId" : ObjectId("5de9bd8a58c38e0edc807e83")
+    }
+    shards:
+        { "_id" : "PASystem_mongodb_shard_s1", "host" : "PASystem_mongodb_shard_s1/12.23.64.146:28001,12.23.64.168:28001,12.23.64.181:28001", "state" : 1 }
+        { "_id" : "PASystem_mongodb_shard_s2", "host" : "PASystem_mongodb_shard_s2/12.23.64.109:28001,12.23.64.148:28001,12.23.64.167:28001", "state" : 1 }
+        { "_id" : "PASystem_mongodb_shard_s3", "host" : "PASystem_mongodb_shard_s3/12.23.64.152:28001,12.23.64.155:28001,12.23.64.81:28001", "state" : 1 }
+    active mongoses:
+        "4.2.1" : 1
+    autosplit:
+        Currently enabled: yes
+    balancer:
+        Currently enabled: yes
+        Currently running: yes
+        Collections with active migrations:
+            pa_fab.dc started at Tue Dec 17 2019 10:15:53 GMT+0900 (Korea Standard Time)
+        Failed balancer rounds in last 5 attempts: 0
+        Migration Results for the last 24 hours:
+            25 : Success
+    databases:
+        { "_id" : "config", "primary" : "config", "partitioned" : true }
+            config.system.sessions
+                shard key: { "_id" : 1 }
+                unique: false
+                balancing: true
+                chunks:
+                    PASystem_mongodb_shard_s1   1
+                        { "_id" : { "$minKey" : 1 } } -->> { "_id" : { "$maxKey" : 1 } } on : PASystem_mongodb_shard_s1 Timestamp(1, 0)
+        { "_id" : "pa_eng", "primary" : "PASystem_mongodb_shard_s2", "partitioned" : false, "version" : { "uuid" : UUID("fcecde3e-3f83-4a5f-9797-86dc4c1b859c"), "lastMod" : 1 } }
+        { "_id" : "pa_fab", "primary" : "PASystem_mongodb_shard_s2", "partitioned" : true, "version" : { "uuid" : UUID("75c63702-b4d7-4baf-85a7-258131fd6c0d"), "lastMod" : 1 } }
+            pa_fab.dc
+                shard key: { "tkout_time" : "hashed" }
+                unique: false
+                balancing: true
+                chunks:
+                    PASystem_mongodb_shard_s1   13
+                    PASystem_mongodb_shard_s2   1204
+                    PASystem_mongodb_shard_s3   12
+                    too many chunks to print, use verbose if you want to force print
+        { "_id" : "pa_server", "primary" : "PASystem_mongodb_shard_s2", "partitioned" : false, "version" : { "uuid" : UUID("cfb2ff08-835d-4bf8-9f4e-4ce6bf29af37"), "lastMod" : 1 } }
+        { "_id" : "test_database", "primary" : "PASystem_mongodb_shard_s2", "partitioned" : false, "version" : { "uuid" : UUID("9a8136d6-602b-4291-922e-5085d81cd2df"), "lastMod" : 1 } }
+mongos> db.getSiblingDB("pa_fab").dc.getShardDistribution()
+Shard PASystem_mongodb_shard_s1 at PASystem_mongodb_shard_s1/12.23.64.146:28001,12.23.64.168:28001,12.23.64.181:28001
+    data : 4.54GiB docs : 132280 chunks : 146
+    estimated data per chunk : 31.91MiB
+    estimated docs per chunk : 906
+Shard PASystem_mongodb_shard_s2 at PASystem_mongodb_shard_s2/12.23.64.109:28001,12.23.64.148:28001,12.23.64.167:28001
+    data : 34.2GiB docs : 966078 chunks : 937
+    estimated data per chunk : 37.37MiB
+    estimated docs per chunk : 1031
+Shard PASystem_mongodb_shard_s3 at PASystem_mongodb_shard_s3/12.23.64.152:28001,12.23.64.155:28001,12.23.64.81:28001
+    data : 4.44GiB docs : 130261 chunks : 146
+    estimated data per chunk : 31.14MiB
+    estimated docs per chunk : 892
+Totals
+    data : 43.19GiB docs : 1228619 chunks : 1229
+    Shard PASystem_mongodb_shard_s1 contains 10.53% data, 10.76% docs in cluster, avg obj size on shard : 36KiB
+    Shard PASystem_mongodb_shard_s2 contains 79.18% data, 78.63% docs in cluster, avg obj size on shard : 37KiB
+    Shard PASystem_mongodb_shard_s3 contains 10.28% data, 10.6% docs in cluster, avg obj size on shard : 35KiB
